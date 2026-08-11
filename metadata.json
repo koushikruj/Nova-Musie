@@ -1,0 +1,8 @@
+{
+  "name": "Nova Music Player",
+  "description": "A minimal, dark, artwork-first music streaming player with real audio playback, playlists, queue, search, and library management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
