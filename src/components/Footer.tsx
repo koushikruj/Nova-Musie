@@ -36,9 +36,6 @@ export const Footer: React.FC = () => {
             </div>
             <span className="font-extrabold text-sm tracking-widest text-white uppercase flex items-center gap-2">
               NOVA MUSIC
-              <span className="text-[10px] font-mono font-medium px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400">
-                v3.2 PRO
-              </span>
             </span>
           </div>
           <p className="text-xs text-neutral-400 max-w-xs font-light">

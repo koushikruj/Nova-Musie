@@ -3,29 +3,30 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React from 'react';
-import { PlayerProvider } from './context/PlayerContext';
+import React, { Suspense, lazy } from 'react';
+import { PlayerProvider, usePlayer } from './context/PlayerContext';
 import { Header } from './components/Header';
 import { MainPlayer } from './components/MainPlayer';
-import { QueueDrawer } from './components/QueueDrawer';
-import { PlaylistDrawer } from './components/PlaylistDrawer';
-import { SearchModal } from './components/SearchModal';
-import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
-import { LyricsDrawer } from './components/LyricsDrawer';
-import { AddContentModal } from './components/AddContentModal';
-import { SleepTimerModal } from './components/SleepTimerModal';
-import { LanguageSelectorModal } from './components/LanguageSelectorModal';
-import { Toast } from './components/Toast';
-import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
-import { usePlayer } from './context/PlayerContext';
-import { useAudioVisualizerBackground } from './hooks/useAudioVisualizerBackground';
 import { LibrarySection } from './components/LibrarySection';
 import { MiniPlayer } from './components/MiniPlayer';
 import { Footer } from './components/Footer';
+import { Toast } from './components/Toast';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import { useAudioVisualizerBackground } from './hooks/useAudioVisualizerBackground';
+
+// Lazy-load non-critical drawers and modals for faster player initialization
+const QueueDrawer = lazy(() => import('./components/QueueDrawer').then(m => ({ default: m.QueueDrawer })));
+const PlaylistDrawer = lazy(() => import('./components/PlaylistDrawer').then(m => ({ default: m.PlaylistDrawer })));
+const SearchModal = lazy(() => import('./components/SearchModal').then(m => ({ default: m.SearchModal })));
+const KeyboardShortcutsModal = lazy(() => import('./components/KeyboardShortcutsModal').then(m => ({ default: m.KeyboardShortcutsModal })));
+const LyricsDrawer = lazy(() => import('./components/LyricsDrawer').then(m => ({ default: m.LyricsDrawer })));
+const AddContentModal = lazy(() => import('./components/AddContentModal').then(m => ({ default: m.AddContentModal })));
+const SleepTimerModal = lazy(() => import('./components/SleepTimerModal').then(m => ({ default: m.SleepTimerModal })));
+const LanguageSelectorModal = lazy(() => import('./components/LanguageSelectorModal').then(m => ({ default: m.LanguageSelectorModal })));
 
 const AppContent: React.FC = () => {
   useKeyboardShortcuts();
-  const { currentTrack } = usePlayer();
+  const { currentTrack, activeDrawer } = usePlayer();
   const bgRef = useAudioVisualizerBackground();
 
   return (
@@ -60,18 +61,20 @@ const AppContent: React.FC = () => {
         {/* Floating Mini Player */}
         <MiniPlayer />
 
-      {/* Drawers and Overlays */}
-      <QueueDrawer />
-      <PlaylistDrawer />
-      <SearchModal />
-      <KeyboardShortcutsModal />
-      <LyricsDrawer />
-      <AddContentModal />
-      <SleepTimerModal />
-      <LanguageSelectorModal />
+        {/* Lazy Loaded Drawers and Overlays */}
+        <Suspense fallback={null}>
+          {activeDrawer === 'queue' && <QueueDrawer />}
+          {(activeDrawer === 'playlists' || activeDrawer === 'library') && <PlaylistDrawer />}
+          {activeDrawer === 'search' && <SearchModal />}
+          {activeDrawer === 'shortcuts' && <KeyboardShortcutsModal />}
+          {activeDrawer === 'lyrics' && <LyricsDrawer />}
+          {activeDrawer === 'addContent' && <AddContentModal />}
+          {activeDrawer === 'sleep' && <SleepTimerModal />}
+          {activeDrawer === 'language' && <LanguageSelectorModal />}
+        </Suspense>
 
-      {/* Quick Feedback Toast */}
-      <Toast />
+        {/* Quick Feedback Toast */}
+        <Toast />
       </div>
     </div>
   );
