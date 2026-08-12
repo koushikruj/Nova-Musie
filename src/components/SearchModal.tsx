@@ -298,14 +298,9 @@ export const SearchModal: React.FC = () => {
                       className="w-12 h-12 rounded-lg object-cover shrink-0"
                     />
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <h4 className="font-semibold text-sm text-white group-hover:text-emerald-300 transition-colors truncate">
-                          {track.title}
-                        </h4>
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0">
-                          {track.audioUrl.startsWith('youtube:') ? 'Full Audio' : '30s Preview'}
-                        </span>
-                      </div>
+                      <h4 className="font-semibold text-sm text-white group-hover:text-emerald-300 transition-colors truncate">
+                        {track.title}
+                      </h4>
                       <p className="text-xs text-neutral-400 truncate mt-0.5">
                         {track.artist} • {track.album}
                       </p>
