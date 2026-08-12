@@ -1,5 +1,5 @@
 import React from 'react';
-import { Search, ListMusic, Music2, HelpCircle, Link, Moon, Disc3 } from 'lucide-react';
+import { Search, ListMusic, Music2, HelpCircle, Link, Moon, Disc3, RotateCcw } from 'lucide-react';
 import { usePlayer } from '../context/PlayerContext';
 
 export const Header: React.FC = () => {
@@ -10,6 +10,34 @@ export const Header: React.FC = () => {
     currentTrack,
     isPlaying
   } = usePlayer();
+
+  const handleClearCache = async () => {
+    if (window.confirm("Are you sure you want to clear browser cache and reset application data?")) {
+      try {
+        // Clear Local & Session Storage
+        localStorage.clear();
+        sessionStorage.clear();
+
+        // Clear CacheStorage API if available
+        if ('caches' in window) {
+          const cacheNames = await caches.keys();
+          await Promise.all(cacheNames.map(name => caches.delete(name)));
+        }
+
+        // Clear IndexedDB databases if supported
+        if ('indexedDB' in window && indexedDB.databases) {
+          const dbs = await indexedDB.databases();
+          dbs.forEach(db => {
+            if (db.name) indexedDB.deleteDatabase(db.name);
+          });
+        }
+      } catch (e) {
+        console.error('Error clearing cache:', e);
+      } finally {
+        window.location.reload();
+      }
+    }
+  };
 
   return (
     <header className="sticky top-0 z-30 w-full bg-black/60 backdrop-blur-2xl border-b border-white/10 backdrop-saturate-150 shadow-lg shadow-black/40 px-3 sm:px-6 md:px-8 py-2.5 sm:py-3.5 flex items-center justify-between text-neutral-300 gap-2">
@@ -84,7 +112,6 @@ export const Header: React.FC = () => {
             )}
           </button>
 
-          
           {/* Add Content button */}
           <button
             onClick={() => setActiveDrawer('addContent')}
@@ -97,6 +124,7 @@ export const Header: React.FC = () => {
           >
             <Link className="w-3.5 h-3.5" />
           </button>
+
           {/* Sleep Timer button */}
           <button
             onClick={() => setActiveDrawer('sleep')}
@@ -121,6 +149,16 @@ export const Header: React.FC = () => {
             title="Keyboard Shortcuts (?)"
           >
             <HelpCircle className="w-3.5 h-3.5" />
+          </button>
+
+          {/* Clear Browser Cache & Reset button */}
+          <button
+            onClick={handleClearCache}
+            className="flex items-center gap-1.5 p-1.5 sm:px-2.5 sm:py-1.5 rounded-lg text-xs font-medium transition-all duration-200 border bg-neutral-900/80 text-amber-400 border-amber-500/20 hover:bg-amber-950/40 hover:text-amber-300 hover:border-amber-500/40"
+            title="Clear Browser Cache & Reset App Data"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span className="hidden xl:inline">Clear Cache</span>
           </button>
         </div>
     </header>

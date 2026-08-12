@@ -342,71 +342,109 @@ async function startServer() {
     }
   });
 
-  // Spotify / Online Live Track Search Endpoint
+  // Spotify & YouTube Music / Online Live Track Search Endpoint
   app.get('/api/spotify/search', async (req: Request, res: Response) => {
     try {
-      const q = req.query.q ? String(req.query.q).trim() : '';
-      if (!q) {
-        return res.json([]);
-      }
+      const q = req.query.q ? String(req.query.q).trim() : 'Top Music Hits';
+      const page = req.query.page ? parseInt(String(req.query.page), 10) : 1;
+      const offset = (page - 1) * 10;
 
-      console.log(`Live online track search for: "${q}"`);
-      const itunesRes = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(q)}&entity=song&limit=15`);
-      
-      if (!itunesRes.ok) {
-        return res.json([]);
-      }
+      console.log(`Live online track search for: "${q}" (Page ${page})`);
 
-      const data = await itunesRes.json();
-      if (!Array.isArray(data.results)) {
-        return res.json([]);
-      }
+      // Determine query variations for pagination/related content
+      let searchQuery = q;
+      if (page === 2) searchQuery = `${q} song audio`;
+      else if (page === 3) searchQuery = `${q} remix playlist`;
+      else if (page > 3) searchQuery = `${q} related tracks`;
 
-      const searchResultsPromises = data.results.slice(0, 10).map(async (s: any, idx: number) => {
-        const query = `${s.trackName} ${s.artistName}`;
-        let trackAudio = null;
-        let trackDuration = s.trackTimeMillis ? Math.round(s.trackTimeMillis / 1000) : 180;
+      // Parallel fetch: Direct YouTube Music search + iTunes metadata search
+      const ytPromise = yts(searchQuery).catch(() => null);
+      const itunesPromise = fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(q)}&entity=song&limit=10&offset=${offset}`)
+        .then(r => r.ok ? r.json() : { results: [] })
+        .catch(() => ({ results: [] }));
 
-        try {
-          const ytRes = await yts(query);
-          if (ytRes && ytRes.videos && ytRes.videos.length > 0) {
-            trackAudio = `youtube:${ytRes.videos[0].videoId}`;
-            trackDuration = ytRes.videos[0].seconds || trackDuration;
+      const [ytData, itunesData] = await Promise.all([ytPromise, itunesPromise]);
+
+      const searchResults: any[] = [];
+      const seenKeys = new Set<string>();
+
+      // 1. YouTube Music direct search results
+      if (ytData && ytData.videos && ytData.videos.length > 0) {
+        ytData.videos.slice(0, 10).forEach((v: any, idx: number) => {
+          if (!v.videoId) return;
+          const key = `${v.title}-${v.author?.name}`.toLowerCase().replace(/[^a-z0-9]/g, '');
+          if (!seenKeys.has(key)) {
+            seenKeys.add(key);
+            searchResults.push({
+              id: `ytm-${v.videoId}-p${page}-${idx}`,
+              title: v.title,
+              artist: v.author?.name || 'YouTube Music Artist',
+              album: 'YouTube Music',
+              albumArt: v.image || v.thumbnail || `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
+              audioUrl: `youtube:${v.videoId}`,
+              duration: v.seconds || 210,
+              genre: 'YouTube Music',
+              year: new Date().getFullYear(),
+              description: `YouTube Music track: ${v.title}`
+            });
           }
-        } catch (e) {}
+        });
+      }
 
-        if (!trackAudio) {
+      // 2. iTunes / Spotify metadata search results
+      if (itunesData && Array.isArray(itunesData.results)) {
+        const itunesPromises = itunesData.results.slice(0, 10).map(async (s: any, idx: number) => {
+          const key = `${s.trackName}-${s.artistName}`.toLowerCase().replace(/[^a-z0-9]/g, '');
+          if (seenKeys.has(key)) return null;
+          seenKeys.add(key);
+
+          const query = `${s.trackName} ${s.artistName}`;
+          let trackAudio = null;
+          let trackDuration = s.trackTimeMillis ? Math.round(s.trackTimeMillis / 1000) : 180;
+
           try {
-            const fallbackYt = await yts(s.trackName).catch(() => null);
-            if (fallbackYt && fallbackYt.videos && fallbackYt.videos.length > 0) {
-              trackAudio = `youtube:${fallbackYt.videos[0].videoId}`;
-              trackDuration = fallbackYt.videos[0].seconds || 210;
-            } else {
+            const ytRes = await yts(query);
+            if (ytRes && ytRes.videos && ytRes.videos.length > 0) {
+              trackAudio = `youtube:${ytRes.videos[0].videoId}`;
+              trackDuration = ytRes.videos[0].seconds || trackDuration;
+            }
+          } catch (e) {}
+
+          if (!trackAudio) {
+            try {
+              const fallbackYt = await yts(s.trackName).catch(() => null);
+              if (fallbackYt && fallbackYt.videos && fallbackYt.videos.length > 0) {
+                trackAudio = `youtube:${fallbackYt.videos[0].videoId}`;
+                trackDuration = fallbackYt.videos[0].seconds || 210;
+              } else {
+                trackAudio = 'youtube:BEYCEq1m6kk';
+                trackDuration = 210;
+              }
+            } catch (e) {
               trackAudio = 'youtube:BEYCEq1m6kk';
               trackDuration = 210;
             }
-          } catch (e) {
-            trackAudio = 'youtube:BEYCEq1m6kk';
-            trackDuration = 210;
           }
-        }
 
-        return {
-          id: `search-${s.trackId || idx}-${Date.now()}`,
-          title: s.trackName,
-          artist: s.artistName,
-          album: s.collectionName || 'Single',
-          albumArt: s.artworkUrl100 ? s.artworkUrl100.replace('100x100bb', '600x600bb') : 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?q=80&w=800&auto=format&fit=crop',
-          audioUrl: trackAudio,
-          duration: trackDuration,
-          genre: s.primaryGenreName || 'Pop',
-          year: s.releaseDate ? new Date(s.releaseDate).getFullYear() : 2024,
-          description: `Live Spotify track import for ${s.trackName} by ${s.artistName}`
-        };
-      });
+          return {
+            id: `search-${s.trackId || idx}-p${page}-${Date.now()}`,
+            title: s.trackName,
+            artist: s.artistName,
+            album: s.collectionName || 'Single',
+            albumArt: s.artworkUrl100 ? s.artworkUrl100.replace('100x100bb', '600x600bb') : 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?q=80&w=800&auto=format&fit=crop',
+            audioUrl: trackAudio,
+            duration: trackDuration,
+            genre: s.primaryGenreName || 'Pop',
+            year: s.releaseDate ? new Date(s.releaseDate).getFullYear() : 2024,
+            description: `Live Spotify track import for ${s.trackName} by ${s.artistName}`
+          };
+        });
 
-      let searchResults = await Promise.all(searchResultsPromises);
-      searchResults = searchResults.filter((t: any) => t.title && t.artist && t.audioUrl);
+        const resolvedItunes = await Promise.all(itunesPromises);
+        resolvedItunes.forEach(t => {
+          if (t && t.title && t.artist) searchResults.push(t);
+        });
+      }
 
       return res.json(searchResults);
     } catch (err: any) {

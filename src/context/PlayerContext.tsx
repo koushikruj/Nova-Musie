@@ -558,14 +558,14 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     if (audioRef.current) audioRef.current.pause();
     if (ytPlayerRef.current) ytPlayerRef.current.pauseVideo();
 
-    // Check if this track is a 30s preview snippet or non-youtube URL that needs full track resolution
-    const needsResolution = !track.audioUrl.startsWith('youtube:') ||
-                            track.audioUrl.includes('itunes-assets') || 
-                            track.audioUrl.includes('.p.m4a') || 
-                            track.audioUrl.includes('preview') ||
-                            track.audioUrl.includes('apple.com') ||
-                            track.audioUrl.includes('scdn.co') ||
-                            track.duration <= 35;
+    // Check if this track is a preview snippet or non-youtube URL that needs full track resolution
+    const needsResolution = (!track.audioUrl.startsWith('youtube:') || track.audioUrl === 'youtube:BEYCEq1m6kk') && (
+      track.audioUrl.includes('itunes-assets') || 
+      track.audioUrl.includes('.p.m4a') || 
+      track.audioUrl.includes('preview') ||
+      track.audioUrl.includes('apple.com') ||
+      track.audioUrl.includes('scdn.co')
+    );
 
     let targetTrack = track;
 
