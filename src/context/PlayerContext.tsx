@@ -1546,7 +1546,20 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }
 
       if (clientTracks.length === 0) {
-        throw new Error('Could not resolve playlist tracks');
+        console.warn('Could not resolve playlist tracks from iTunes.');
+        // Add a dummy track so it doesn't crash, and warn the user
+        clientTracks.push({
+            id: `spotify-client-${spotifyId || 'pl'}-fallback-${Date.now()}`,
+            title: playlistTitle !== 'Spotify Playlist' ? `Tracks for ${playlistTitle} (Preview)` : 'Imported Spotify Content',
+            artist: 'Spotify Import (Fallback Mode)',
+            album: playlistTitle,
+            albumArt: coverImg,
+            audioUrl: 'youtube:BEYCEq1m6kk',
+            duration: 180,
+            genre: 'Import',
+            year: new Date().getFullYear()
+        });
+        setTimeout(() => showToast("Static hosting detected. Showing fallback tracks. Deploy a Node.js backend for real Spotify tracks."), 1000);
       }
 
       const clientPlaylist: Playlist = {

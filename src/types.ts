@@ -11,6 +11,19 @@ export interface Track {
   isFavorite?: boolean;
   addedAt?: string;
   description?: string;
+  youtubeVideoId?: string;
+  youtubeUrl?: string;
+  embedUrl?: string;
+  channelName?: string;
+  channelId?: string;
+  publishedAt?: string;
+  viewCount?: string;
+  contentType?: string;
+  category?: string;
+  isFeatured?: boolean;
+  status?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface Playlist {
