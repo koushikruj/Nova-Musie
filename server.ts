@@ -44,7 +44,7 @@ async function startServer() {
   let tracks = [
     {
       id: 'track-1',
-      title: 'Midnight Rain & Saloon Chill',
+      title: 'Midnight Rain & Nova Chill',
       artist: 'Velvet Lounge',
       album: 'Nocturne Echoes',
       albumArt: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?q=80&w=800&auto=format&fit=crop',
@@ -79,7 +79,7 @@ async function startServer() {
       id: 'track-4',
       title: 'Velvet Jazz After Dark',
       artist: 'The Midnight Trio',
-      album: 'Saloon After Hours',
+      album: 'Nova After Hours',
       albumArt: 'https://images.unsplash.com/photo-1511192336575-5a79af67a629?q=80&w=800&auto=format&fit=crop',
       audioUrl: 'https://cdn.pixabay.com/download/audio/2022/10/14/audio_9939f60f68.mp3?filename=smooth-waters-115977.mp3',
       duration: 195,
@@ -90,8 +90,8 @@ async function startServer() {
 
   let playlists = [
     {
-      id: 'playlist-saloon-classics',
-      name: 'Saloon Essentials',
+      id: 'playlist-nova-classics',
+      name: 'Nova Essentials',
       description: 'The definitive minimal lounge and lo-fi curation.',
       coverImage: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?q=80&w=800&auto=format&fit=crop',
       trackIds: ['track-1', 'track-2', 'track-4'],
@@ -103,7 +103,7 @@ async function startServer() {
   app.get('/api/health', (req: Request, res: Response) => {
     res.json({
       status: 'ok',
-      service: 'Saloon Radio Engine',
+      service: 'Nova Radio Engine',
       timestamp: new Date().toISOString(),
       activeListeners: Math.floor(12 + Math.random() * 48)
     });
@@ -698,7 +698,7 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Saloon Music Server listening on http://0.0.0.0:${PORT}`);
+    console.log(`Nova Music Server listening on http://0.0.0.0:${PORT}`);
   });
 }
 

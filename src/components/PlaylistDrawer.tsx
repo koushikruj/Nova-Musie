@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Plus, Play, Shuffle, Trash2, Heart, Music, FolderPlus, Check, Sparkles, Music2 } from 'lucide-react';
+import { X, Plus, Play, Shuffle, Trash2, Heart, Music, FolderPlus, Check, Sparkles, Music2, ArrowUp, ArrowDown, Link, PlusCircle } from 'lucide-react';
 import { usePlayer } from '../context/PlayerContext';
 import { Playlist, Track } from '../types';
 import { SpotifyImportModal } from './SpotifyImportModal';
@@ -19,14 +19,25 @@ export const PlaylistDrawer: React.FC = () => {
     createPlaylist,
     deletePlaylist,
     removeTrackFromPlaylist,
-    toggleFavorite
+    reorderPlaylistTracks,
+    addCustomTrackToPlaylist,
+    toggleFavorite,
+    hasPermission
   } = usePlayer();
 
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<string | 'favorites' | null>(null);
   const [showCreateForm, setShowCreateForm] = useState<boolean>(false);
+  const [showAddSongForm, setShowAddSongForm] = useState<boolean>(false);
   const [showSpotifyModal, setShowSpotifyModal] = useState<boolean>(false);
+  
+  // New Playlist form state
   const [newPlName, setNewPlName] = useState<string>('');
   const [newPlDesc, setNewPlDesc] = useState<string>('');
+
+  // New Song to Playlist form state
+  const [customTitle, setCustomTitle] = useState<string>('');
+  const [customArtist, setCustomArtist] = useState<string>('');
+  const [customUrl, setCustomUrl] = useState<string>('');
 
   if (activeDrawer !== 'playlists' && activeDrawer !== 'library') return null;
 
@@ -38,6 +49,70 @@ export const PlaylistDrawer: React.FC = () => {
     setNewPlDesc('');
     setShowCreateForm(false);
     setSelectedPlaylistId(created.id);
+  };
+
+  const [isAddingSong, setIsAddingSong] = useState(false);
+  const [songError, setSongError] = useState<string | null>(null);
+
+  const extractYoutubeId = (url: string) => {
+    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
+    const match = url.match(regExp);
+    return (match && match[2].length === 11) ? match[2] : null;
+  };
+
+  const handleAddSongSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedPlaylistId || selectedPlaylistId === 'favorites') return;
+    if (!customUrl.trim()) return;
+
+    setIsAddingSong(true);
+    setSongError(null);
+
+    let finalTitle = customTitle.trim();
+    let finalArtist = customArtist.trim() || 'Unknown Artist';
+    let finalUrl = customUrl.trim();
+    let finalArt = 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?q=80&w=800&auto=format&fit=crop';
+
+    try {
+      // YouTube Metadata Extraction
+      const ytId = extractYoutubeId(finalUrl);
+      if (ytId) {
+        finalUrl = `youtube:${ytId}`;
+        try {
+          const res = await fetch(`https://noembed.com/embed?url=https://www.youtube.com/watch?v=${ytId}`);
+          const data = await res.json();
+          if (data && data.title) {
+            if (!finalTitle) finalTitle = data.title;
+            if (customArtist.trim() === '') finalArtist = data.author_name || 'YouTube';
+            finalArt = data.thumbnail_url || `https://i.ytimg.com/vi/${ytId}/hqdefault.jpg`;
+          }
+        } catch (err) {
+          console.warn('Could not fetch YouTube metadata');
+        }
+      } else if (!finalUrl.startsWith('http')) {
+        throw new Error('Invalid URL. Must be a valid http(s) link or YouTube URL.');
+      }
+
+      if (!finalTitle) {
+        finalTitle = 'Custom Link';
+      }
+
+      addCustomTrackToPlaylist(selectedPlaylistId, {
+        title: finalTitle,
+        artist: finalArtist,
+        audioUrl: finalUrl,
+        albumArt: finalArt
+      });
+
+      setCustomTitle('');
+      setCustomArtist('');
+      setCustomUrl('');
+      setShowAddSongForm(false);
+    } catch (err: any) {
+      setSongError(err.message || 'Failed to add song. Please check the URL.');
+    } finally {
+      setIsAddingSong(false);
+    }
   };
 
   const allTracksMap = new Map<string, Track>();
@@ -66,14 +141,16 @@ export const PlaylistDrawer: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShowSpotifyModal(true)}
-              className="px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 text-xs font-medium flex items-center gap-1.5 transition-colors"
-              title="Auto-create playlist from Spotify link"
-            >
-              <Music2 className="w-3.5 h-3.5" />
-              <span>Import Spotify</span>
-            </button>
+            {hasPermission('canImportSpotify') && (
+              <button
+                onClick={() => setShowSpotifyModal(true)}
+                className="px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 text-xs font-medium flex items-center gap-1.5 transition-colors"
+                title="Auto-create playlist from Spotify link"
+              >
+                <Music2 className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Import Spotify</span>
+              </button>
+            )}
             <button
               onClick={() => setShowCreateForm(prev => !prev)}
               className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-xs font-medium flex items-center gap-1 transition-colors"
@@ -135,7 +212,10 @@ export const PlaylistDrawer: React.FC = () => {
           {selectedPlaylistId ? (
             <div>
               <button
-                onClick={() => setSelectedPlaylistId(null)}
+                onClick={() => {
+                  setSelectedPlaylistId(null);
+                  setShowAddSongForm(false);
+                }}
                 className="text-xs text-neutral-400 hover:text-white mb-4 flex items-center gap-1"
               >
                 ← Back to Playlists
@@ -222,9 +302,21 @@ export const PlaylistDrawer: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5">
                       <button
-                        onClick={() => deletePlaylist(selectedPlaylist.id)}
+                        onClick={() => setShowAddSongForm(prev => !prev)}
+                        className="px-2.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 text-xs font-bold flex items-center gap-1 transition-colors"
+                        title="Add custom song from URL or source"
+                      >
+                        <PlusCircle className="w-3.5 h-3.5" />
+                        <span>Add Song</span>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          deletePlaylist(selectedPlaylist.id);
+                          setSelectedPlaylistId(null);
+                        }}
                         className="p-1.5 rounded-lg text-neutral-400 hover:text-rose-400 hover:bg-rose-500/10"
                         title="Delete playlist"
                       >
@@ -232,6 +324,63 @@ export const PlaylistDrawer: React.FC = () => {
                       </button>
                     </div>
                   </div>
+
+                  {/* Add Custom Song Form inline */}
+                  {showAddSongForm && (
+                    <form onSubmit={handleAddSongSubmit} className="mb-4 p-3.5 rounded-xl bg-neutral-900 border border-amber-500/30 space-y-2.5">
+                      <h4 className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+                        <Link className="w-3.5 h-3.5" /> Add Song via Link / YouTube
+                      </h4>
+                      {songError && (
+                        <div className="p-2 rounded bg-rose-500/20 text-rose-300 text-[10px] font-medium border border-rose-500/30">
+                          {songError}
+                        </div>
+                      )}
+                      <input
+                        type="text"
+                        placeholder="Song Title (Auto-fetched for YouTube)"
+                        value={customTitle}
+                        onChange={e => setCustomTitle(e.target.value)}
+                        className="w-full px-3 py-1.5 rounded-lg bg-neutral-800 border border-white/10 text-xs text-white focus:outline-none focus:border-amber-500/50"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Artist Name (Optional)"
+                        value={customArtist}
+                        onChange={e => setCustomArtist(e.target.value)}
+                        className="w-full px-3 py-1.5 rounded-lg bg-neutral-800 border border-white/10 text-xs text-white focus:outline-none focus:border-amber-500/50"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Audio Stream / YouTube / Direct MP3 Link *"
+                        value={customUrl}
+                        onChange={e => setCustomUrl(e.target.value)}
+                        className="w-full px-3 py-1.5 rounded-lg bg-neutral-800 border border-white/10 text-xs text-white focus:outline-none focus:border-amber-500/50 font-mono"
+                        required
+                      />
+                      <div className="flex justify-end gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => setShowAddSongForm(false)}
+                          disabled={isAddingSong}
+                          className="px-3 py-1 rounded-md text-xs text-neutral-400 hover:text-white disabled:opacity-50"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={isAddingSong}
+                          className="px-3 py-1 rounded-md bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs shadow-md shadow-amber-500/20 disabled:opacity-50 flex items-center gap-1"
+                        >
+                          {isAddingSong ? (
+                            <>Loading <span className="animate-ping">...</span></>
+                          ) : (
+                            'Add to Playlist'
+                          )}
+                        </button>
+                      </div>
+                    </form>
+                  )}
 
                   {selectedPlaylistTracks.length > 0 && (
                     <div className="flex items-center gap-2 mb-4">
@@ -246,36 +395,59 @@ export const PlaylistDrawer: React.FC = () => {
                   )}
 
                   {selectedPlaylistTracks.length === 0 ? (
-                    <p className="text-xs text-neutral-500 py-6 text-center">
-                      Playlist is empty. Add tracks from Search or Catalog.
-                    </p>
+                    <div className="p-6 text-center rounded-xl bg-neutral-900/40 border border-white/5 space-y-2">
+                      <Music2 className="w-8 h-8 text-neutral-600 mx-auto" />
+                      <p className="text-xs text-neutral-400 font-medium">Playlist is empty.</p>
+                      <p className="text-[11px] text-neutral-500">Click "Add Song" above or import from Spotify.</p>
+                    </div>
                   ) : (
                     <div className="space-y-1.5">
-                      {selectedPlaylistTracks.map(track => (
+                      {selectedPlaylistTracks.map((track, idx) => (
                         <div
-                          key={track.id}
-                          className="p-2.5 rounded-xl bg-neutral-900/60 border border-white/5 hover:bg-neutral-800/80 flex items-center justify-between gap-3 group"
+                          key={`${track.id}-${idx}`}
+                          className="p-2.5 rounded-xl bg-neutral-900/60 border border-white/5 hover:bg-neutral-800/80 flex items-center justify-between gap-2.5 group"
                         >
                           <img
                             src={track.albumArt}
                             alt={track.title}
-                            className="w-10 h-10 rounded-lg object-cover"
+                            className="w-10 h-10 rounded-lg object-cover shrink-0"
                           />
                           <div className="flex-1 min-w-0">
                             <h4 className="font-medium text-xs text-white truncate">{track.title}</h4>
                             <p className="text-[11px] text-neutral-400 truncate mt-0.5">{track.artist}</p>
                           </div>
-                          <div className="flex items-center gap-1">
+
+                          {/* Controls: Reorder Up/Down, Play, Remove */}
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              onClick={() => reorderPlaylistTracks(selectedPlaylist.id, idx, idx - 1)}
+                              disabled={idx === 0}
+                              className="p-1 rounded text-neutral-500 hover:text-white disabled:opacity-20 transition-colors"
+                              title="Move Up"
+                            >
+                              <ArrowUp className="w-3.5 h-3.5" />
+                            </button>
+
+                            <button
+                              onClick={() => reorderPlaylistTracks(selectedPlaylist.id, idx, idx + 1)}
+                              disabled={idx === selectedPlaylistTracks.length - 1}
+                              className="p-1 rounded text-neutral-500 hover:text-white disabled:opacity-20 transition-colors"
+                              title="Move Down"
+                            >
+                              <ArrowDown className="w-3.5 h-3.5" />
+                            </button>
+
                             <button
                               onClick={() => playTrack(track, selectedPlaylistTracks)}
-                              className="p-1 rounded text-neutral-400 hover:text-white"
+                              className="p-1 rounded text-neutral-400 hover:text-white transition-colors"
                               title="Play song"
                             >
                               <Play className="w-3.5 h-3.5 fill-current" />
                             </button>
+
                             <button
                               onClick={() => removeTrackFromPlaylist(selectedPlaylist.id, track.id)}
-                              className="p-1 rounded text-neutral-400 hover:text-rose-400"
+                              className="p-1 rounded text-neutral-400 hover:text-rose-400 transition-colors"
                               title="Remove song from playlist"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
@@ -372,3 +544,4 @@ export const PlaylistDrawer: React.FC = () => {
     </div>
   );
 };
+

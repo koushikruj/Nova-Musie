@@ -3,14 +3,14 @@ import { X, Plus, Link as LinkIcon, Music, Globe, Loader2 } from 'lucide-react';
 import { usePlayer } from '../context/PlayerContext';
 
 export const AddContentModal: React.FC = () => {
-  const { activeDrawer, setActiveDrawer, addCustomTrack, showToast } = usePlayer();
+  const { activeDrawer, setActiveDrawer, addCustomTrack, showToast, hasPermission } = usePlayer();
   const [url, setUrl] = useState('');
   const [title, setTitle] = useState('');
   const [artist, setArtist] = useState('');
   const [language, setLanguage] = useState('English');
   const [isLoading, setIsLoading] = useState(false);
 
-  if (activeDrawer !== 'addContent') return null;
+  if (activeDrawer !== 'addContent' || !hasPermission('canAddContent')) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

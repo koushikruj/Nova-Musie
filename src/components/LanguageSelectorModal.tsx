@@ -7,7 +7,7 @@ export const LanguageSelectorModal: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
   
   useEffect(() => {
-    const lang = localStorage.getItem('saloon_language');
+    const lang = localStorage.getItem('nova_language') || localStorage.getItem('saloon_language');
     if (!lang) {
       setIsOpen(true);
     }
@@ -16,7 +16,7 @@ export const LanguageSelectorModal: React.FC = () => {
   if (!isOpen) return null;
 
   const handleSelect = (lang: string) => {
-    localStorage.setItem('saloon_language', lang);
+    localStorage.setItem('nova_language', lang);
     setIsOpen(false);
     showToast(`Language set to ${lang}`);
   };
@@ -37,7 +37,7 @@ export const LanguageSelectorModal: React.FC = () => {
           </div>
           <h2 className="text-xl font-bold text-white mb-2">Choose Your Language</h2>
           <p className="text-sm text-neutral-400">
-            Select your preferred content language to get started with Nova Music. You can change this later and add any content.
+            Select your preferred content language to get started with Sur Music. You can change this later and add any content.
           </p>
         </div>
         <div className="p-4 space-y-2">

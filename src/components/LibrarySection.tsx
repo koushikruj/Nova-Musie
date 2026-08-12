@@ -126,7 +126,7 @@ export const LibrarySection: React.FC = () => {
                 onClick={() => playPlaylist(playlist)}
                 className="group cursor-pointer rounded-xl bg-white/5 hover:bg-white/10 p-4 transition-colors duration-200 flex items-center gap-4"
               >
-                <div className="w-16 h-16 rounded-lg bg-indigo-500/20 flex shrink-0 items-center justify-center relative overflow-hidden text-indigo-400">
+                <div className="w-16 h-16 rounded-lg bg-amber-500/20 flex shrink-0 items-center justify-center relative overflow-hidden text-amber-400">
                   <Music className="w-8 h-8 opacity-50" />
                   <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity duration-200">
                     <Play className="w-6 h-6 fill-white text-white" />
@@ -140,6 +140,19 @@ export const LibrarySection: React.FC = () => {
             ))}
           </div>
         </section>
+      )}
+
+      {/* Empty State */}
+      {favoriteTracks.length === 0 && recentlyPlayed.length === 0 && playlists.length === 0 && (
+        <div className="flex flex-col items-center justify-center py-20 text-center space-y-4">
+          <div className="w-16 h-16 rounded-full bg-amber-500/10 flex items-center justify-center mb-2">
+            <Music className="w-8 h-8 text-amber-500/50" />
+          </div>
+          <h2 className="text-xl font-bold text-white tracking-tight">Your library is empty</h2>
+          <p className="text-sm text-neutral-400 max-w-sm">
+            Start saving your favorite songs, creating playlists, and listening to tracks to build your personal music collection.
+          </p>
+        </div>
       )}
     </div>
   );

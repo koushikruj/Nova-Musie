@@ -13,7 +13,8 @@ export const useKeyboardShortcuts = () => {
     toggleShuffle,
     cycleRepeat,
     setActiveDrawer,
-    activeDrawer
+    activeDrawer,
+    hasPermission
   } = usePlayer();
 
   useEffect(() => {
@@ -30,7 +31,9 @@ export const useKeyboardShortcuts = () => {
       // Cmd+K or Ctrl+K for search
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
-        setActiveDrawer(activeDrawer === 'search' ? null : 'search');
+        if (hasPermission('canSearchCatalog')) {
+          setActiveDrawer(activeDrawer === 'search' ? null : 'search');
+        }
         return;
       }
 

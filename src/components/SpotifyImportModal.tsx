@@ -8,12 +8,6 @@ interface SpotifyImportModalProps {
   onSuccess?: (playlistId: string) => void;
 }
 
-const DEMO_SPOTIFY_URLS = [
-  { name: 'Lofi Beats', url: 'https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M' },
-  { name: 'Chill Lofi Study', url: 'https://open.spotify.com/playlist/37i9dQZF1DX8Ueb9q3e121' },
-  { name: 'Jazz in the Background', url: 'https://open.spotify.com/playlist/37i9dQZF1DWV7EzA83213a' },
-];
-
 export const SpotifyImportModal: React.FC<SpotifyImportModalProps> = ({ isOpen, onClose, onSuccess }) => {
   const { importSpotifyPlaylist, playPlaylist } = usePlayer();
   const [spotifyUrl, setSpotifyUrl] = useState('');
@@ -43,10 +37,6 @@ export const SpotifyImportModal: React.FC<SpotifyImportModalProps> = ({ isOpen, 
     } else {
       setErrorMsg('Could not import Spotify playlist. Please check the URL or ID format.');
     }
-  };
-
-  const handleSelectSample = (url: string) => {
-    setSpotifyUrl(url);
   };
 
   return (
@@ -99,29 +89,6 @@ export const SpotifyImportModal: React.FC<SpotifyImportModalProps> = ({ isOpen, 
               {errorMsg}
             </div>
           )}
-
-          {/* Quick Presets */}
-          <div className="space-y-2">
-            <span className="text-[10px] uppercase font-mono tracking-wider text-neutral-400 font-medium">
-              Or Try a Sample Spotify Curation:
-            </span>
-            <div className="flex flex-wrap gap-1.5">
-              {DEMO_SPOTIFY_URLS.map((sample) => (
-                <button
-                  key={sample.url}
-                  type="button"
-                  onClick={() => handleSelectSample(sample.url)}
-                  className={`px-2.5 py-1 rounded-lg text-xs transition-all border ${
-                    spotifyUrl === sample.url
-                      ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300 font-medium'
-                      : 'bg-neutral-800/80 hover:bg-neutral-800 border-white/5 text-neutral-300'
-                  }`}
-                >
-                  {sample.name}
-                </button>
-              ))}
-            </div>
-          </div>
 
           {/* Action Footer */}
           <div className="pt-2 flex items-center justify-end gap-2 border-t border-white/5">

@@ -3,7 +3,7 @@ import { X, Keyboard } from 'lucide-react';
 import { usePlayer } from '../context/PlayerContext';
 
 export const KeyboardShortcutsModal: React.FC = () => {
-  const { activeDrawer, setActiveDrawer } = usePlayer();
+  const { activeDrawer, setActiveDrawer, hasPermission } = usePlayer();
 
   if (activeDrawer !== 'shortcuts') return null;
 
@@ -18,7 +18,7 @@ export const KeyboardShortcutsModal: React.FC = () => {
     { key: 'R', desc: 'Cycle Repeat (Off / All / One)' },
     { key: 'Q', desc: 'Toggle Playback Queue' },
     { key: 'L', desc: 'Toggle Playlists & Library' },
-    { key: '⌘ K / Ctrl K', desc: 'Open Catalog Search' },
+    ...(hasPermission('canSearchCatalog') ? [{ key: '⌘ K / Ctrl K', desc: 'Open Catalog Search' }] : []),
     { key: '?', desc: 'Keyboard Shortcuts Menu' },
   ];
 

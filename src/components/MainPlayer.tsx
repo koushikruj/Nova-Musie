@@ -45,7 +45,8 @@ export const MainPlayer: React.FC = () => {
     cycleRepeat,
     toggleFavorite,
     setActiveDrawer,
-    activeDrawer
+    activeDrawer,
+    hasPermission
   } = usePlayer();
 
   if (!currentTrack) {
@@ -53,10 +54,10 @@ export const MainPlayer: React.FC = () => {
       <div className="flex-1 flex flex-col items-center justify-center p-6 text-center text-neutral-400">
         <p className="text-lg">No track loaded</p>
         <button
-          onClick={() => setActiveDrawer('search')}
+          onClick={() => setActiveDrawer(hasPermission('canSearchCatalog') ? 'search' : 'playlists')}
           className="mt-4 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm"
         >
-          Browse Catalog
+          {hasPermission('canSearchCatalog') ? 'Browse Catalog' : 'Open Playlists'}
         </button>
       </div>
     );
@@ -286,16 +287,18 @@ export const MainPlayer: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-1">
-              {/* Lyrics Button */}
-              <button
-                onClick={() => setActiveDrawer('lyrics')}
-                className={`p-2 rounded-full transition-colors ${
-                  activeDrawer === 'lyrics' ? 'text-emerald-400 bg-emerald-400/10' : 'hover:text-white'
-                }`}
-                title="Lyrics"
-              >
-                <Mic2 className="w-5 h-5" />
-              </button>
+              {/* Lyrics Button (visible if user has lyrics permission) */}
+              {hasPermission('canAccessLyrics') && (
+                <button
+                  onClick={() => setActiveDrawer('lyrics')}
+                  className={`p-2 rounded-full transition-colors ${
+                    activeDrawer === 'lyrics' ? 'text-emerald-400 bg-emerald-400/10' : 'hover:text-white'
+                  }`}
+                  title="Lyrics"
+                >
+                  <Mic2 className="w-5 h-5" />
+                </button>
+              )}
 
               {/* Add track to playlist button */}
               <button

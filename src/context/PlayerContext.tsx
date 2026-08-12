@@ -1,7 +1,23 @@
-import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import YouTube, { YouTubePlayer } from 'react-youtube';
-import { Track, Playlist, RepeatMode, DrawerType } from '../types';
-import { DEMO_TRACKS, DEMO_PLAYLISTS } from '../data/demoTracks';
+import { Track, Playlist, RepeatMode, DrawerType, UserProfile, SubscriptionRequest, UserPermissions, BanRecord } from '../types';
+import { DEFAULT_TRACKS, DEFAULT_PLAYLISTS } from '../data/defaultTracks';
+import { 
+  initFirebaseService, 
+  onAuthStateChanged, 
+  fetchOrCreateUserProfile, 
+  updateUserSubscriptionInFirestore,
+  updateUserPermissionsInFirestore,
+  saveSubscriptionRequestToFirestore,
+  updateSubscriptionRequestStatusInFirestore,
+  subscribeToUserProfileSnapshot,
+  subscribeToSubscriptionRequestsSnapshot,
+  subscribeToBannedListSnapshot,
+  banUserInFirestore,
+  unbanUserInFirestore,
+  updateUserProfileNameAndPhoto
+} from '../services/firebase';
+import { getHardwareId, getPublicIpAddress } from '../utils/deviceInfo';
 
 // Client-side full-length track resolver for static deployments (Netlify, GitHub Pages, etc.)
 async function resolveFullTrackClientSide(title: string, artist: string): Promise<{ audioUrl: string; duration: number } | null> {
@@ -75,6 +91,32 @@ interface PlayerContextType {
   favorites: string[];
   recentlyPlayed: Track[];
 
+  // User & Subscription state
+  userProfile: UserProfile | null;
+  setUserProfile: React.Dispatch<React.SetStateAction<UserProfile | null>>;
+  checkFeatureAccess: (featureName?: string) => boolean;
+  hasPermission: (permission: 'canSearchCatalog' | 'canAddContent' | 'canImportSpotify' | 'canAccessLyrics' | 'canAccessEqualizer') => boolean;
+
+  // Subscription Requests & Admin Management
+  subscriptionRequests: SubscriptionRequest[];
+  unreadRequestCount: number;
+  createSubscriptionRequest: (data: {
+    userId: string;
+    userName: string;
+    userEmail: string;
+    planName: string;
+    amount: string;
+    durationDays: number;
+    paymentMethod: string;
+  }) => void;
+  approveSubscriptionRequest: (requestId: string) => Promise<void>;
+  rejectSubscriptionRequest: (requestId: string) => void;
+  updateUserPermissions: (permissions: Partial<UserPermissions>) => void;
+
+  // Enhanced Sleep Timer state
+  sleepTimerSeconds: number | null;
+  setSleepTimerSeconds: React.Dispatch<React.SetStateAction<number | null>>;
+
   // UI state
   activeDrawer: DrawerType;
   setActiveDrawer: (drawer: DrawerType) => void;
@@ -82,6 +124,19 @@ interface PlayerContextType {
   setSearchQuery: (query: string) => void;
   toastMessage: string | null;
   showToast: (message: string) => void;
+
+  // Device & Ban Enforcement State
+  currentIp: string;
+  currentHwid: string;
+  bannedIps: string[];
+  bannedHwids: string[];
+  banRecords: BanRecord[];
+  isCurrentSessionBanned: boolean;
+  banUser: (targetUid: string, targetIp: string | null, targetHwid: string | null, banIp: boolean, banHwid: boolean, reason?: string) => Promise<void>;
+  unbanUser: (targetUid: string, targetIp: string | null, targetHwid: string | null) => Promise<void>;
+
+  // User Profile Editing
+  updateProfileName: (displayName: string, photoURL?: string) => Promise<void>;
 
   // Actions
   play: () => Promise<void>;
@@ -101,18 +156,25 @@ interface PlayerContextType {
   clearQueue: () => void;
   reorderQueue: (fromIndex: number, toIndex: number) => void;
   toggleFavorite: (trackOrId: string | Track) => void;
-  createPlaylist: (name: string, desc?: string) => void;
+  createPlaylist: (name: string, desc?: string) => Playlist;
   addTrackToPlaylist: (playlistId: string, trackId: string) => void;
+  removeTrackFromPlaylist: (playlistId: string, trackId: string) => void;
+  reorderPlaylistTracks: (playlistId: string, fromIndex: number, toIndex: number) => void;
+  addCustomTrackToPlaylist: (playlistId: string, track: Partial<Track>) => void;
+  deletePlaylist: (playlistId: string) => void;
+  updatePlaylist: (playlistId: string, updates: Partial<Playlist>) => void;
   importSpotifyPlaylist: (spotifyUrl: string) => Promise<Playlist | null>;
   addCustomTrack: (track: Partial<Track>) => void;
 }
 
+
 const STORAGE_KEYS = {
-  TRACKS: 'saloon_tracks_v3',
-  PLAYLISTS: 'saloon_playlists_v3',
-  FAVORITES: 'saloon_favorites_v3',
-  STATE: 'saloon_player_state_v3',
-  RECENTLY_PLAYED: 'saloon_recently_played_v3'
+  TRACKS: 'nova_tracks_v3',
+  PLAYLISTS: 'nova_playlists_v3',
+  FAVORITES: 'nova_favorites_v3',
+  STATE: 'nova_player_state_v3',
+  RECENTLY_PLAYED: 'nova_recently_played_v3',
+  SUBSCRIPTION_REQUESTS: 'nova_subscription_requests_v1'
 };
 
 const PlayerContext = createContext<PlayerContextType | undefined>(undefined);
@@ -132,18 +194,18 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.TRACKS);
       if (saved) return JSON.parse(saved);
-      return DEMO_TRACKS;
+      return DEFAULT_TRACKS;
     } catch {
-      return DEMO_TRACKS;
+      return DEFAULT_TRACKS;
     }
   });
 
   const [playlists, setPlaylists] = useState<Playlist[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.PLAYLISTS);
-      return saved ? JSON.parse(saved) : DEMO_PLAYLISTS;
+      return saved ? JSON.parse(saved) : DEFAULT_PLAYLISTS;
     } catch {
-      return DEMO_PLAYLISTS;
+      return DEFAULT_PLAYLISTS;
     }
   });
 
@@ -153,13 +215,12 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          // Filter out stale dummy IDs like track-1/track-4 if present without matching tracks
           return parsed;
         }
       }
-      return [DEMO_TRACKS[0].id, DEMO_TRACKS[1].id];
+      return [DEFAULT_TRACKS[0].id, DEFAULT_TRACKS[1].id];
     } catch {
-      return [DEMO_TRACKS[0].id, DEMO_TRACKS[1].id];
+      return [DEFAULT_TRACKS[0].id, DEFAULT_TRACKS[1].id];
     }
   });
 
@@ -182,8 +243,8 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   })();
   
-  const initialCurrentTrack = savedState?.currentTrack || DEMO_TRACKS[0];
-  const initialQueue = savedState?.queue && savedState.queue.length > 0 ? savedState.queue : DEMO_TRACKS;
+  const initialCurrentTrack = savedState?.currentTrack || DEFAULT_TRACKS[0];
+  const initialQueue = savedState?.queue && savedState.queue.length > 0 ? savedState.queue : DEFAULT_TRACKS;
   const initialQueueIndex = savedState?.queueIndex !== undefined ? savedState.queueIndex : 0;
   
   const [currentTrack, setCurrentTrack] = useState<Track | null>(initialCurrentTrack);
@@ -204,6 +265,12 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [isYoutube, setIsYoutube] = useState<boolean>(firstTrackIsYoutube);
   const [youtubeId, setYoutubeId] = useState<string | null>(firstTrackIsYoutube ? initialCurrentTrack.audioUrl.replace('youtube:', '') : null);
 
+  // User & Subscription state - strictly null when not logged in
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+
+  // Enhanced Sleep Timer State (in seconds)
+  const [sleepTimerSeconds, setSleepTimerSeconds] = useState<number | null>(null);
+
   // UI state
   const [activeDrawer, setActiveDrawer] = useState<DrawerType>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -219,6 +286,432 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setToastMessage(null);
     }, 2800);
   }, []);
+
+  // Device & Ban Enforcement State
+  const [currentIp, setCurrentIp] = useState<string>('127.0.0.1');
+  const currentHwid = useMemo(() => getHardwareId(), []);
+  const [bannedIps, setBannedIps] = useState<string[]>([]);
+  const [bannedHwids, setBannedHwids] = useState<string[]>([]);
+  const [banRecords, setBanRecords] = useState<BanRecord[]>([]);
+
+  // Fetch Public IP on mount
+  useEffect(() => {
+    getPublicIpAddress().then(ip => {
+      if (ip) setCurrentIp(ip);
+    });
+  }, []);
+
+  // Listen to global banned identifiers snapshot in Firestore
+  useEffect(() => {
+    const unsubscribe = subscribeToBannedListSnapshot((ips, hwids, records) => {
+      setBannedIps(ips);
+      setBannedHwids(hwids);
+      setBanRecords(records);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Real-time calculation of session ban status
+  const isCurrentSessionBanned = useMemo(() => {
+    if (userProfile?.isBanned) return true;
+    if (currentIp && bannedIps.includes(currentIp)) return true;
+    if (currentHwid && bannedHwids.includes(currentHwid)) return true;
+    return false;
+  }, [userProfile?.isBanned, currentIp, bannedIps, currentHwid, bannedHwids]);
+
+  // Pause playback immediately if session becomes banned
+  useEffect(() => {
+    if (isCurrentSessionBanned && isPlaying) {
+      pause();
+    }
+  }, [isCurrentSessionBanned, isPlaying]);
+
+  const banUser = async (
+    targetUid: string, 
+    targetIp: string | null, 
+    targetHwid: string | null, 
+    banIp: boolean, 
+    banHwid: boolean, 
+    reason?: string
+  ) => {
+    await banUserInFirestore(targetUid, targetIp, targetHwid, banIp, banHwid, userProfile?.uid || 'admin', reason);
+    showToast(`🚫 Ban applied to ${banIp ? 'IP' : ''} ${banHwid ? 'HWID' : ''}`);
+  };
+
+  const unbanUser = async (targetUid: string, targetIp: string | null, targetHwid: string | null) => {
+    await unbanUserInFirestore(targetUid, targetIp, targetHwid);
+    showToast('✅ User unbanned');
+  };
+
+  const updateProfileName = async (displayName: string, photoURL?: string) => {
+    if (!userProfile?.uid) return;
+    await updateUserProfileNameAndPhoto(userProfile.uid, displayName, photoURL);
+    setUserProfile(prev => prev ? ({ ...prev, displayName, photoURL: photoURL || prev.photoURL }) : null);
+    showToast(`Updated display name to "${displayName}"`);
+  };
+
+  // Subscription Requests & Admin Management State
+  const [subscriptionRequests, setSubscriptionRequests] = useState<SubscriptionRequest[]>([]);
+
+  // Gate Feature Access for Free vs Subscribed Users
+  const checkFeatureAccess = useCallback((featureName: string = 'this feature'): boolean => {
+    if (userProfile?.isSubscribed && userProfile.status !== 'paused') {
+      return true;
+    }
+    if (userProfile?.status === 'paused') {
+      showToast('⏸️ Your subscription is currently paused.');
+      setActiveDrawer('subscription');
+      return false;
+    }
+    // Free user attempted a PRO feature
+    showToast(`🔒 Subscribe to Nova Premium to access ${featureName}`);
+    setActiveDrawer('subscription');
+    return false;
+  }, [userProfile?.isSubscribed, userProfile?.status, showToast]);
+
+  const hasPermission = useCallback((permission: 'canSearchCatalog' | 'canAddContent' | 'canImportSpotify' | 'canAccessLyrics' | 'canAccessEqualizer'): boolean => {
+    if (!userProfile) return false;
+
+    // RULE 1: If subscription is paused by admin, ALL features are completely blocked
+    if (userProfile.status === 'paused') {
+      return false;
+    }
+
+    // RULE 2: Explicit permission override in userProfile.permissions
+    if (userProfile.permissions && typeof userProfile.permissions[permission] === 'boolean') {
+      return userProfile.permissions[permission]!;
+    }
+
+    // RULE 3: Active PRO Subscribers have access to all features
+    if (userProfile.isSubscribed) {
+      return true;
+    }
+
+    // RULE 4: Free users only have access to catalog search (unless restricted)
+    if (permission === 'canSearchCatalog') return true;
+
+    return false;
+  }, [userProfile]);
+
+  // Sync User Profile to localStorage
+  useEffect(() => {
+    try {
+      if (userProfile) {
+        localStorage.setItem('nova_user_profile', JSON.stringify(userProfile));
+      } else {
+        localStorage.removeItem('nova_user_profile');
+        localStorage.removeItem('saloon_user_profile');
+      }
+    } catch (e) {
+      console.error('Failed saving user profile', e);
+    }
+  }, [userProfile]);
+
+  // Firebase Auth Observer
+  useEffect(() => {
+    const { auth } = initFirebaseService();
+    if (!auth) return;
+
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        const profile = await fetchOrCreateUserProfile(user);
+        setUserProfile(profile);
+      } else {
+        // Clear all user profile state and cached local storage on logout/unauthenticated
+        setUserProfile(null);
+        setSubscriptionRequests([]);
+        try {
+          localStorage.removeItem('nova_user_profile');
+          localStorage.removeItem('saloon_user_profile');
+          localStorage.removeItem(STORAGE_KEYS.SUBSCRIPTION_REQUESTS);
+        } catch (e) {
+          console.error('Failed clearing profile on logout', e);
+        }
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Real-time Firestore Listener for User Profile & Subscription Status
+  useEffect(() => {
+    if (!userProfile?.uid) return;
+
+    const unsubscribe = subscribeToUserProfileSnapshot(userProfile.uid, (data) => {
+      if (!data) return;
+
+      let isSubscribed = data.isSubscribed ?? false;
+      if (isSubscribed && data.subscriptionExpiresAt) {
+        const expires = new Date(data.subscriptionExpiresAt).getTime();
+        if (Date.now() > expires) {
+          isSubscribed = false;
+        }
+      }
+
+      const updatedStatus = data.status || (isSubscribed ? 'active' : 'free');
+      const effectiveSubscribed = isSubscribed && updatedStatus !== 'paused';
+      const updatedPlan = effectiveSubscribed ? (data.subscriptionPlan || 'Premium Monthly') : 'Free Tier';
+      const updatedExpiresAt = data.subscriptionExpiresAt || null;
+
+      setUserProfile(prev => {
+        const becameSubscribed = (!prev?.isSubscribed) && effectiveSubscribed;
+        const becamePaused = prev?.status !== 'paused' && updatedStatus === 'paused';
+        const becameRevoked = (prev?.isSubscribed || prev?.status === 'paused') && !effectiveSubscribed && updatedStatus === 'free';
+
+        // Check if profile changed
+        if (
+          prev?.isSubscribed !== effectiveSubscribed ||
+          prev?.status !== updatedStatus ||
+          prev?.subscriptionPlan !== updatedPlan ||
+          prev?.subscriptionExpiresAt !== updatedExpiresAt ||
+          JSON.stringify(prev?.permissions) !== JSON.stringify(data.permissions)
+        ) {
+          if (becameSubscribed) {
+            showToast('🎉 Real-time Update: Pro Subscription Approved & Activated!');
+          } else if (becamePaused) {
+            showToast('⏸️ Real-time Update: Your subscription has been PAUSED by Admin. Feature access disabled.');
+          } else if (becameRevoked) {
+            showToast('❌ Real-time Update: Your subscription has been REVOKED/RESTRICTED.');
+          }
+
+          const updatedProfile: UserProfile = {
+            ...(prev || {
+              uid: userProfile.uid,
+              email: data.email || null,
+              displayName: data.displayName || 'Music Fan',
+              photoURL: null
+            }),
+            isSubscribed: effectiveSubscribed,
+            subscriptionPlan: updatedPlan,
+            subscribedAt: data.subscribedAt || prev?.subscribedAt,
+            subscriptionExpiresAt: updatedExpiresAt,
+            status: updatedStatus,
+            isAdmin: data.isAdmin ?? prev?.isAdmin ?? (data.email === 'sko134329@gmail.com'),
+            permissions: data.permissions || (
+              updatedStatus === 'paused' ? {
+                canSearchCatalog: false,
+                canAddContent: false,
+                canImportSpotify: false,
+                canAccessLyrics: false,
+                canAccessEqualizer: false
+              } : {
+                canSearchCatalog: true,
+                canAddContent: effectiveSubscribed,
+                canImportSpotify: effectiveSubscribed,
+                canAccessLyrics: effectiveSubscribed,
+                canAccessEqualizer: effectiveSubscribed
+              }
+            )
+          };
+
+          try {
+            localStorage.setItem('nova_user_profile', JSON.stringify(updatedProfile));
+          } catch (e) {
+            console.error('Failed to sync profile to localStorage', e);
+          }
+
+          return updatedProfile;
+        }
+        return prev;
+      });
+    });
+
+    return () => unsubscribe();
+  }, [userProfile?.uid, showToast]);
+
+  // Real-time Firestore Listener for Subscription Requests (only for logged-in users)
+  useEffect(() => {
+    if (!userProfile?.uid) {
+      setSubscriptionRequests([]);
+      return;
+    }
+
+    const unsubscribe = subscribeToSubscriptionRequestsSnapshot((requests) => {
+      if (requests && requests.length > 0) {
+        setSubscriptionRequests(requests);
+        try {
+          localStorage.setItem(STORAGE_KEYS.SUBSCRIPTION_REQUESTS, JSON.stringify(requests));
+        } catch (e) {
+          console.error('Failed to sync subscription requests', e);
+        }
+      }
+    });
+
+    return () => unsubscribe();
+  }, [userProfile?.uid]);
+
+  // Sleep Timer Seconds Ticker
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval>;
+    if (sleepTimerSeconds !== null && sleepTimerSeconds > 0) {
+      interval = setInterval(() => {
+        setSleepTimerSeconds((prev) => (prev && prev > 0 ? prev - 1 : 0));
+      }, 1000);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [sleepTimerSeconds]);
+
+  const createSubscriptionRequest = useCallback((data: {
+    userId: string;
+    userName: string;
+    userEmail: string;
+    planName: string;
+    amount: string;
+    durationDays: number;
+    paymentMethod: string;
+  }) => {
+    const newReq: SubscriptionRequest = {
+      id: `req_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+      userId: data.userId,
+      userName: data.userName,
+      userEmail: data.userEmail,
+      planName: data.planName,
+      amount: data.amount,
+      durationDays: data.durationDays,
+      paymentMethod: data.paymentMethod,
+      createdAt: new Date().toISOString(),
+      status: 'pending'
+    };
+
+    setSubscriptionRequests(prev => {
+      const updated = [newReq, ...prev];
+      try {
+        localStorage.setItem(STORAGE_KEYS.SUBSCRIPTION_REQUESTS, JSON.stringify(updated));
+      } catch (e) {
+        console.error('Failed to save subscription requests', e);
+      }
+      return updated;
+    });
+
+    saveSubscriptionRequestToFirestore(newReq);
+
+    showToast('📩 Subscription request sent to Account Owner!');
+  }, [showToast]);
+
+  const approveSubscriptionRequest = useCallback(async (requestId: string) => {
+    let targetReq: SubscriptionRequest | undefined;
+
+    setSubscriptionRequests(prev => {
+      const updated = prev.map(req => {
+        if (req.id === requestId) {
+          targetReq = req;
+          return { ...req, status: 'approved' as const };
+        }
+        return req;
+      });
+      try {
+        localStorage.setItem(STORAGE_KEYS.SUBSCRIPTION_REQUESTS, JSON.stringify(updated));
+      } catch (e) {
+        console.error(e);
+      }
+      return updated;
+    });
+
+    updateSubscriptionRequestStatusInFirestore(requestId, 'approved');
+
+    if (targetReq) {
+      const req: SubscriptionRequest = targetReq;
+      const days = req.durationDays || 30;
+      const planName = req.planName || 'Premium VIP Monthly';
+      const uid = req.userId || userProfile?.uid || 'guest-uid';
+
+      try {
+        const updated = await updateUserSubscriptionInFirestore(uid, true, planName, days);
+        const expiry = updated?.subscriptionExpiresAt || new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+
+        setUserProfile(prev => {
+          const baseProfile = prev || {
+            uid: uid,
+            email: req.userEmail || 'user@example.com',
+            displayName: req.userName || 'Music Enthusiast',
+            photoURL: null,
+            isAdmin: false
+          };
+
+          const updatedProfile: UserProfile = {
+            ...baseProfile,
+            isSubscribed: true,
+            subscriptionPlan: planName,
+            subscribedAt: new Date().toISOString(),
+            subscriptionExpiresAt: expiry,
+            permissions: {
+              canSearchCatalog: true,
+              canAddContent: true,
+              canImportSpotify: true,
+              canAccessLyrics: true,
+              canAccessEqualizer: true
+            }
+          };
+
+          try {
+            localStorage.setItem('nova_user_profile', JSON.stringify(updatedProfile));
+          } catch (e) {
+            console.error('Failed to save updated profile to localStorage', e);
+          }
+
+          return updatedProfile;
+        });
+
+        showToast(`✅ Request Approved! Upgraded ${req.userName} to ${planName}.`);
+      } catch (err) {
+        console.error('Error approving request:', err);
+        showToast('Subscription request approved.');
+      }
+    }
+  }, [userProfile?.uid, showToast]);
+
+  const rejectSubscriptionRequest = useCallback((requestId: string) => {
+    setSubscriptionRequests(prev => {
+      const updated = prev.map(req => {
+        if (req.id === requestId) {
+          return { ...req, status: 'rejected' as const };
+        }
+        return req;
+      });
+      try {
+        localStorage.setItem(STORAGE_KEYS.SUBSCRIPTION_REQUESTS, JSON.stringify(updated));
+      } catch (e) {
+        console.error(e);
+      }
+      return updated;
+    });
+
+    updateSubscriptionRequestStatusInFirestore(requestId, 'rejected');
+
+    showToast('❌ Subscription request declined.');
+  }, [showToast]);
+
+  const updateUserPermissions = useCallback((newPermissions: Partial<UserPermissions>) => {
+    setUserProfile(prev => {
+      if (!prev) return null;
+      const mergedPermissions = {
+        ...(prev.permissions || {
+          canSearchCatalog: true,
+          canAddContent: prev.isSubscribed,
+          canImportSpotify: prev.isSubscribed,
+          canAccessLyrics: prev.isSubscribed,
+          canAccessEqualizer: prev.isSubscribed
+        }),
+        ...newPermissions
+      };
+
+      if (prev.uid) {
+        updateUserPermissionsInFirestore(prev.uid, mergedPermissions);
+      }
+
+      return {
+        ...prev,
+        permissions: mergedPermissions
+      };
+    });
+    showToast('⚙️ User permissions updated!');
+  }, [showToast]);
+
+  const unreadRequestCount = useMemo(() => {
+    return subscriptionRequests.filter(r => r.status === 'pending').length;
+  }, [subscriptionRequests]);
 
   // Web Audio Context initialization for audio visualizer
   const initWebAudio = useCallback(() => {
@@ -419,7 +912,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       navigator.mediaSession.metadata = new MediaMetadata({
         title: currentTrack.title,
         artist: currentTrack.artist,
-        album: currentTrack.album || 'Nova Music',
+        album: currentTrack.album || 'Sur Music',
         artwork: [
           { src: currentTrack.albumArt, sizes: '512x512', type: 'image/jpeg' }
         ]
@@ -887,6 +1380,75 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     showToast('Added song to playlist');
   };
 
+  const removeTrackFromPlaylist = (playlistId: string, trackId: string) => {
+    setPlaylists(prev =>
+      prev.map(pl => {
+        if (pl.id === playlistId) {
+          return {
+            ...pl,
+            trackIds: pl.trackIds.filter(id => id !== trackId),
+            updatedAt: new Date().toISOString()
+          };
+        }
+        return pl;
+      })
+    );
+    showToast('Removed song from playlist');
+  };
+
+  const reorderPlaylistTracks = (playlistId: string, fromIndex: number, toIndex: number) => {
+    setPlaylists(prev =>
+      prev.map(pl => {
+        if (pl.id !== playlistId) return pl;
+        const nextTrackIds = [...pl.trackIds];
+        if (fromIndex < 0 || fromIndex >= nextTrackIds.length || toIndex < 0 || toIndex >= nextTrackIds.length) return pl;
+        const [moved] = nextTrackIds.splice(fromIndex, 1);
+        nextTrackIds.splice(toIndex, 0, moved);
+        return {
+          ...pl,
+          trackIds: nextTrackIds,
+          updatedAt: new Date().toISOString()
+        };
+      })
+    );
+  };
+
+  const deletePlaylist = (playlistId: string) => {
+    setPlaylists(prev => prev.filter(pl => pl.id !== playlistId));
+    showToast('Deleted playlist');
+  };
+
+  const updatePlaylist = (playlistId: string, updates: Partial<Playlist>) => {
+    setPlaylists(prev => prev.map(pl => {
+      if (pl.id === playlistId) {
+        return { ...pl, ...updates, updatedAt: new Date().toISOString() };
+      }
+      return pl;
+    }));
+    if (updates.name) {
+      showToast(`Updated playlist "${updates.name}"`);
+    } else {
+      showToast('Updated playlist');
+    }
+  };
+
+  const addCustomTrackToPlaylist = (playlistId: string, trackInput: Partial<Track>) => {
+    const newTrack: Track = {
+      id: `custom-track-${Date.now()}`,
+      title: trackInput.title?.trim() || 'Custom Song',
+      artist: trackInput.artist?.trim() || 'Unknown Artist',
+      album: trackInput.album?.trim() || 'Single',
+      albumArt: trackInput.albumArt?.trim() || 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?q=80&w=800&auto=format&fit=crop',
+      audioUrl: trackInput.audioUrl?.trim() || '',
+      duration: trackInput.duration || 210,
+      genre: trackInput.genre?.trim() || 'Custom',
+      year: trackInput.year || new Date().getFullYear()
+    };
+
+    setTracks(prev => [newTrack, ...prev]);
+    addTrackToPlaylist(playlistId, newTrack.id);
+  };
+
   const addCustomTrack = (track: Partial<Track>) => {
     const newTrack: Track = {
       id: `custom-${Date.now()}`,
@@ -1090,12 +1652,33 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         playlists,
         favorites,
         recentlyPlayed,
+        userProfile,
+        setUserProfile,
+        checkFeatureAccess,
+        hasPermission,
+        subscriptionRequests,
+        unreadRequestCount,
+        createSubscriptionRequest,
+        approveSubscriptionRequest,
+        rejectSubscriptionRequest,
+        updateUserPermissions,
+        sleepTimerSeconds,
+        setSleepTimerSeconds,
         activeDrawer,
         setActiveDrawer,
         searchQuery,
         setSearchQuery,
         toastMessage,
         showToast,
+        currentIp,
+        currentHwid,
+        bannedIps,
+        bannedHwids,
+        banRecords,
+        isCurrentSessionBanned,
+        banUser,
+        unbanUser,
+        updateProfileName,
         play,
         pause,
         togglePlay,
@@ -1115,6 +1698,11 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         toggleFavorite,
         createPlaylist,
         addTrackToPlaylist,
+        removeTrackFromPlaylist,
+        reorderPlaylistTracks,
+        addCustomTrackToPlaylist,
+        deletePlaylist,
+        updatePlaylist,
         addCustomTrack,
         importSpotifyPlaylist
       }}

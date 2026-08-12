@@ -24,7 +24,9 @@ export const SearchModal: React.FC = () => {
     playTrack,
     addToQueue,
     toggleFavorite,
-    addTrackToPlaylist
+    addTrackToPlaylist,
+    userProfile,
+    hasPermission
   } = usePlayer();
 
   const [query, setQuery] = useState<string>('');
@@ -62,12 +64,58 @@ export const SearchModal: React.FC = () => {
     });
   };
 
+  // Relevance Scoring Helper
+  const calculateRelevanceScore = (track: Track, searchStr: string): number => {
+    const title = track.title.toLowerCase().trim();
+    const artist = track.artist.toLowerCase().trim();
+    const query = searchStr.toLowerCase().trim();
+    
+    let score = 0;
+    
+    // 1. Exact matches (Highest Priority)
+    if (title === query) score += 1000;
+    if (artist === query) score += 800;
+    
+    // 2. Exact word boundaries
+    const titleWords = title.split(/\s+/);
+    const artistWords = artist.split(/\s+/);
+    
+    if (titleWords.includes(query)) score += 500;
+    if (artistWords.includes(query)) score += 400;
+
+    // 3. Starts with query
+    if (title.startsWith(query)) score += 300;
+    if (artist.startsWith(query)) score += 200;
+    
+    // 4. Partial substring match
+    if (title.includes(query)) score += 100;
+    if (artist.includes(query)) score += 50;
+    
+    return score;
+  };
+
   // Helper to fetch online search results for a given query & page
   const fetchSearchResults = async (searchQuery: string, pageNum: number): Promise<Track[]> => {
-    const combinedResults: Track[] = [];
+    let combinedResults: Track[] = [];
     const seenKeys = new Set<string>();
 
     const actualQuery = searchQuery.trim() || 'Top Music Hits';
+
+    // First: Search Local Tracks
+    if (pageNum === 1 && searchQuery.trim()) {
+      const localMatches = tracks.filter(t => 
+        t.title.toLowerCase().includes(searchQuery.toLowerCase().trim()) || 
+        t.artist.toLowerCase().includes(searchQuery.toLowerCase().trim())
+      );
+      
+      localMatches.forEach(t => {
+        const key = normalizeTrackString(t.title, t.artist);
+        if (!seenKeys.has(key)) {
+          seenKeys.add(key);
+          combinedResults.push(t);
+        }
+      });
+    }
 
     // 1. Express backend search endpoint
     try {
@@ -154,6 +202,16 @@ export const SearchModal: React.FC = () => {
       console.warn('Client-side iTunes fallback:', e);
     }
 
+    // Sort combined results by relevance score (prioritize exact title matches)
+    if (searchQuery.trim()) {
+      combinedResults.sort((a, b) => {
+        const scoreDiff = calculateRelevanceScore(b, actualQuery) - calculateRelevanceScore(a, actualQuery);
+        if (scoreDiff !== 0) return scoreDiff; // Primary sort: High score first
+        // Secondary sort: Alphabetical fallback for ties
+        return a.title.localeCompare(b.title);
+      });
+    }
+
     return combinedResults;
   };
 
@@ -191,7 +249,7 @@ export const SearchModal: React.FC = () => {
     setIsLoadingMore(false);
   };
 
-  if (activeDrawer !== 'search') return null;
+  if (activeDrawer !== 'search' || !hasPermission('canSearchCatalog')) return null;
 
   // Filter out tracks already in the library
   const displayResults = onlineResults.filter(
@@ -281,6 +339,7 @@ export const SearchModal: React.FC = () => {
 
         {/* Online Search Results List */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
+
           <div className="flex items-center justify-between px-1">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
@@ -305,74 +364,78 @@ export const SearchModal: React.FC = () => {
               </p>
             </div>
           ) : (
-            <div className="space-y-2">
+            <div className="flex flex-col gap-4 pb-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
               {displayResults.map(track => (
                 <div
                   key={track.id}
-                  className="p-3 rounded-xl bg-neutral-900/60 border border-white/5 hover:bg-emerald-950/30 hover:border-emerald-500/30 flex items-center justify-between gap-3 group transition-all duration-200"
+                  className="group relative flex flex-col rounded-xl bg-neutral-900/60 border border-white/5 overflow-hidden hover:bg-emerald-950/20 hover:border-emerald-500/30 transition-all duration-300 hover:shadow-xl hover:shadow-emerald-900/20 hover:-translate-y-1"
                 >
-                  <img
-                    src={track.albumArt}
-                    alt={track.title}
-                    className="w-12 h-12 rounded-lg object-cover shrink-0 shadow"
-                  />
-                  <div className="flex-1 min-w-0">
-                    <h4 className="font-semibold text-sm text-white group-hover:text-emerald-300 transition-colors truncate">
-                      {track.title}
-                    </h4>
-                    <p className="text-xs text-neutral-400 truncate mt-0.5">
-                      {track.artist} • {track.album}
-                    </p>
+                  <div className="relative aspect-square w-full overflow-hidden bg-neutral-800">
+                    <img
+                      src={track.albumArt}
+                      alt={track.title}
+                      className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
+                    />
+                    
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-3">
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <button
+                          onClick={() => {
+                            playTrack(track, displayResults);
+                            setActiveDrawer(null);
+                          }}
+                          className="w-12 h-12 rounded-full bg-emerald-500 hover:bg-emerald-400 text-black flex items-center justify-center transform hover:scale-110 transition-all shadow-xl shadow-emerald-900/50 opacity-0 translate-y-4 group-hover:opacity-100 group-hover:translate-y-0 duration-300 delay-75"
+                          title="Play song immediately"
+                        >
+                          <Play className="w-5 h-5 fill-current ml-1" />
+                        </button>
+                      </div>
+
+                      <div className="flex items-center justify-between relative z-10 translate-y-4 group-hover:translate-y-0 opacity-0 group-hover:opacity-100 transition-all duration-300 delay-150">
+                        <button
+                          onClick={() => toggleFavorite(track)}
+                          className={`p-1.5 rounded-full backdrop-blur-md bg-black/40 hover:bg-black/60 transition-colors ${
+                            favorites.includes(track.id) ? 'text-rose-500' : 'text-white hover:text-rose-400'
+                          }`}
+                          title={favorites.includes(track.id) ? 'Unlike' : 'Like'}
+                        >
+                          <Heart className={`w-4 h-4 ${favorites.includes(track.id) ? 'fill-current' : ''}`} />
+                        </button>
+
+                        <div className="flex gap-1.5">
+                          {playlists.length > 0 && (
+                            <button
+                              onClick={() => setPlaylistMenuTrack(track)}
+                              className="p-1.5 rounded-full backdrop-blur-md bg-black/40 hover:bg-black/60 text-white transition-colors"
+                              title="Add to playlist"
+                            >
+                              <ListPlus className="w-4 h-4" />
+                            </button>
+                          )}
+                          <button
+                            onClick={() => addToQueue(track)}
+                            className="p-1.5 rounded-full backdrop-blur-md bg-black/40 hover:bg-black/60 text-white transition-colors"
+                            title="Add to queue"
+                          >
+                            <Plus className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
                   </div>
 
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    {/* Play live stream */}
-                    <button
-                      onClick={() => {
-                        playTrack(track, displayResults);
-                        setActiveDrawer(null);
-                      }}
-                      className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-semibold flex items-center gap-1 hover:scale-105 active:scale-95 transition-transform"
-                      title="Play song immediately"
-                    >
-                      <Play className="w-3.5 h-3.5 fill-current" />
-                      Play
-                    </button>
-
-                    {/* Add to Queue */}
-                    <button
-                      onClick={() => addToQueue(track)}
-                      className="p-2 rounded-full hover:bg-white/10 text-neutral-400 hover:text-white transition-colors"
-                      title="Add to queue"
-                    >
-                      <Plus className="w-4 h-4" />
-                    </button>
-
-                    {/* Favorite Heart */}
-                    <button
-                      onClick={() => toggleFavorite(track)}
-                      className={`p-2 rounded-full transition-colors ${
-                        favorites.includes(track.id) ? 'text-rose-500' : 'text-neutral-400 hover:text-white'
-                      }`}
-                      title={favorites.includes(track.id) ? 'Unlike' : 'Like'}
-                    >
-                      <Heart className={`w-4 h-4 ${favorites.includes(track.id) ? 'fill-current' : ''}`} />
-                    </button>
-
-                    {/* Add to Playlist trigger */}
-                    {playlists.length > 0 && (
-                      <button
-                        onClick={() => setPlaylistMenuTrack(track)}
-                        className="p-2 rounded-full hover:bg-white/10 text-neutral-400 hover:text-white transition-colors"
-                        title="Add to playlist"
-                      >
-                        <ListPlus className="w-4 h-4" />
-                      </button>
-                    )}
+                  <div className="p-3 flex-1 flex flex-col justify-center bg-neutral-900/50">
+                    <h4 className="font-semibold text-sm text-white group-hover:text-emerald-300 transition-colors line-clamp-1" title={track.title}>
+                      {track.title}
+                    </h4>
+                    <p className="text-xs text-neutral-400 line-clamp-1 mt-0.5" title={track.artist}>
+                      {track.artist}
+                    </p>
                   </div>
                 </div>
               ))}
-
+            </div>
               {/* Load More Related Songs Button */}
               {displayResults.length > 0 && (
                 <div className="pt-4 text-center">

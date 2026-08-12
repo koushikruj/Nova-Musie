@@ -14,6 +14,7 @@ export const LyricsDrawer: React.FC = () => {
     activeDrawer,
     setActiveDrawer,
     seek,
+    hasPermission
   } = usePlayer();
 
   const [isLoading, setIsLoading] = useState(false);
@@ -123,7 +124,7 @@ export const LyricsDrawer: React.FC = () => {
     }
   }, [currentTime, syncedLyrics, activeLineIndex]);
 
-  if (activeDrawer !== 'lyrics') return null;
+  if (activeDrawer !== 'lyrics' || !hasPermission('canAccessLyrics')) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black transition-all duration-500 overflow-hidden">

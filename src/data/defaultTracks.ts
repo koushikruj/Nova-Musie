@@ -1,6 +1,6 @@
 import { Track, Playlist } from "../types";
 
-export const DEMO_TRACKS: Track[] = [
+export const DEFAULT_TRACKS: Track[] = [
   {
     "id": "spotify-0RfTLtL1H5QAZ1IuoVJ59R-0-1786389893785",
     "title": "Tu Tu Hai Wohi (The Unwind Mix)",
@@ -333,7 +333,7 @@ export const DEMO_TRACKS: Track[] = [
   }
 ];
 
-export const DEMO_PLAYLISTS: Playlist[] = [
+export const DEFAULT_PLAYLISTS: Playlist[] = [
   {
     "id": "playlist-spotify-0RfTLtL1H5QAZ1IuoVJ59R-1786389906302",
     "name": "Old Hindi Songs Unplugged",

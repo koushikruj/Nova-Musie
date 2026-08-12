@@ -1,0 +1,50 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile and subscription metadata",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "isSubscribed": { "type": "boolean" },
+        "subscriptionPlan": { "type": "string" },
+        "subscribedAt": { "type": "string" },
+        "subscriptionExpiresAt": { "type": "string" },
+        "status": { "type": "string" },
+        "isAdmin": { "type": "boolean" },
+        "permissions": { "type": "object" }
+      },
+      "required": ["uid"]
+    },
+    "SubscriptionRequest": {
+      "title": "SubscriptionRequest",
+      "description": "Subscription upgrade requests submitted by users",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "planName": { "type": "string" },
+        "amount": { "type": "string" },
+        "durationDays": { "type": "number" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "planName", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile collection"
+    },
+    "/subscription_requests/{requestId}": {
+      "schema": "SubscriptionRequest",
+      "description": "Subscription upgrade requests collection"
+    }
+  }
+}
