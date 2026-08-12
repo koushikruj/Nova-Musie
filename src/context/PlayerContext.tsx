@@ -3,6 +3,52 @@ import YouTube, { YouTubePlayer } from 'react-youtube';
 import { Track, Playlist, RepeatMode, DrawerType } from '../types';
 import { DEMO_TRACKS, DEMO_PLAYLISTS } from '../data/demoTracks';
 
+// Client-side full-length track resolver for static deployments (Netlify, GitHub Pages, etc.)
+async function resolveFullTrackClientSide(title: string, artist: string): Promise<{ audioUrl: string; duration: number } | null> {
+  const cleanTitle = (title || 'Song').trim();
+  const cleanArtist = (artist || '').trim();
+  const query = encodeURIComponent(`${cleanTitle} ${cleanArtist}`.trim());
+
+  const endpoints = [
+    `https://invidious.flokinet.to/api/v1/search?q=${query}&type=video`,
+    `https://invidious.nerdvpn.de/api/v1/search?q=${query}&type=video`,
+    `https://iv.melmac.space/api/v1/search?q=${query}&type=video`,
+    `https://invidious.projectsegfau.lt/api/v1/search?q=${query}&type=video`,
+    `https://pipedapi.kavin.rocks/search?q=${query}&filter=all`
+  ];
+
+  for (const endpoint of endpoints) {
+    try {
+      const res = await fetch(endpoint, { signal: AbortSignal.timeout(3500) });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0 && data[0].videoId) {
+          return {
+            audioUrl: `youtube:${data[0].videoId}`,
+            duration: Number(data[0].lengthSeconds) || 210
+          };
+        }
+        if (data && Array.isArray(data.items) && data.items.length > 0) {
+          const first = data.items.find((item: any) => item.type === 'stream' || item.url);
+          if (first && first.url) {
+            const match = first.url.match(/v=([a-zA-Z0-9_-]{11})/);
+            if (match && match[1]) {
+              return {
+                audioUrl: `youtube:${match[1]}`,
+                duration: Number(first.duration) || 210
+              };
+            }
+          }
+        }
+      }
+    } catch (e) {
+      // Continue to next endpoint on timeout
+    }
+  }
+
+  return null;
+}
+
 interface PlayerContextType {
   // Player state
   currentTrack: Track | null;
@@ -276,17 +322,26 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     if (previewTracks.length > 0) {
       previewTracks.forEach(async (track) => {
+        let resolvedData: { audioUrl: string; duration: number } | null = null;
         try {
           const res = await fetch('/api/tracks/resolve-full', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ title: track.title, artist: track.artist })
           });
-          const data = await res.json();
-          if (data.success && data.audioUrl) {
-            setTracks(prev => prev.map(t => t.id === track.id ? { ...t, audioUrl: data.audioUrl, duration: data.duration } : t));
+          if (res.ok) {
+            const data = await res.json();
+            if (data && data.audioUrl) resolvedData = { audioUrl: data.audioUrl, duration: data.duration };
           }
         } catch (e) {}
+
+        if (!resolvedData) {
+          resolvedData = await resolveFullTrackClientSide(track.title, track.artist);
+        }
+
+        if (resolvedData && resolvedData.audioUrl) {
+          setTracks(prev => prev.map(t => t.id === track.id ? { ...t, audioUrl: resolvedData!.audioUrl, duration: resolvedData!.duration } : t));
+        }
       });
     }
   }, []);
@@ -515,25 +570,36 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     let targetTrack = track;
 
     if (needsResolution) {
+      let resolvedData: { audioUrl: string; duration: number } | null = null;
       try {
         const res = await fetch('/api/tracks/resolve-full', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ title: track.title, artist: track.artist })
         });
-        const data = await res.json();
-        if (data && data.audioUrl) {
-          targetTrack = {
-            ...track,
-            audioUrl: data.audioUrl,
-            duration: data.duration || 210
-          };
-          // Persist resolved full track into state so preview URL is permanently replaced
-          setTracks(prev => prev.map(t => t.id === track.id ? targetTrack : t));
-          setQueue(prev => prev.map(t => t.id === track.id ? targetTrack : t));
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.audioUrl && data.audioUrl.startsWith('youtube:')) {
+            resolvedData = { audioUrl: data.audioUrl, duration: data.duration || 210 };
+          }
         }
       } catch (err) {
-        console.warn('Track auto-resolve error:', err);
+        console.warn('Backend auto-resolve error, attempting client-side full track resolution:', err);
+      }
+
+      if (!resolvedData) {
+        resolvedData = await resolveFullTrackClientSide(track.title, track.artist);
+      }
+
+      if (resolvedData && resolvedData.audioUrl) {
+        targetTrack = {
+          ...track,
+          audioUrl: resolvedData.audioUrl,
+          duration: resolvedData.duration || 210
+        };
+        // Persist resolved full track into state so preview URL is permanently replaced
+        setTracks(prev => prev.map(t => t.id === track.id ? targetTrack : t));
+        setQueue(prev => prev.map(t => t.id === track.id ? targetTrack : t));
       }
     }
 
@@ -556,7 +622,14 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (autoPlay) {
         setIsPlaying(true);
         if (ytPlayerRef.current) {
-          ytPlayerRef.current.playVideo();
+          try {
+            if (typeof ytPlayerRef.current.loadVideoById === 'function') {
+              ytPlayerRef.current.loadVideoById(videoId);
+            }
+            ytPlayerRef.current.playVideo();
+          } catch (e) {
+            console.warn('YouTube playVideo error:', e);
+          }
         }
       } else {
         setIsPlaying(false);
@@ -567,10 +640,8 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     // Direct HTTP audio fallback (only for long audio URLs)
     setYoutubeId(null);
     if (audioRef.current) {
-      const isExternalHttp = targetTrack.audioUrl.startsWith('http://') || targetTrack.audioUrl.startsWith('https://');
-      const audioSource = isExternalHttp
-        ? `/api/proxy-audio?url=${encodeURIComponent(targetTrack.audioUrl)}`
-        : targetTrack.audioUrl;
+      // Use direct audio URL for static hosting (Netlify, GitHub Pages) without proxy 404
+      const audioSource = targetTrack.audioUrl;
 
       audioRef.current.src = audioSource;
       audioRef.current.volume = isMuted ? 0 : volume;
@@ -951,6 +1022,11 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         event.target.setPlaybackRate(playbackRate);
       } catch (e) {}
     }
+    if (isPlaying || isLoading) {
+      try {
+        event.target.playVideo();
+      } catch (e) {}
+    }
   };
 
   const onYtStateChange = (event: { target: YouTubePlayer, data: number }) => {
@@ -1045,12 +1121,12 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     >
       {children}
       {youtubeId && (
-        <div className="fixed -top-full -left-full w-0 h-0 opacity-0 pointer-events-none overflow-hidden">
+        <div className="fixed top-0 -left-[9999px] w-[300px] h-[300px] opacity-0 pointer-events-none z-[-100]">
           <YouTube
             videoId={youtubeId}
             opts={{
-              height: '0',
-              width: '0',
+              height: '300',
+              width: '300',
               playerVars: {
                 autoplay: 1,
                 controls: 0,
@@ -1059,7 +1135,9 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 modestbranding: 1,
                 rel: 0,
                 showinfo: 0,
-                iv_load_policy: 3
+                iv_load_policy: 3,
+                enablejsapi: 1,
+                origin: typeof window !== 'undefined' ? window.location.origin : undefined
               },
             }}
             onReady={onYtReady}
